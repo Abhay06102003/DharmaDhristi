@@ -86,7 +86,7 @@ class SimplifiedKnowledgeGraph:
         self.neo4j_graph.merge(tail_node, "Entity", "name")
         
         # Create relationship
-        rel = Relationship(head_node, relation, tail_node)
+        rel = Relationship(head_node, relation, tail_node,)
         self.neo4j_graph.merge(rel)
         
     def extract_and_add_from_text(self, text: str) -> List[Dict]:
