@@ -1,4 +1,5 @@
 import torch
+torch.cuda.empty_cache()
 from torch_geometric.data import Data
 from transformers import AutoTokenizer, AutoModel,AutoModelForCausalLM
 import torch.nn.functional as F

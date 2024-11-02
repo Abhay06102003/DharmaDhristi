@@ -5,9 +5,37 @@ from transformers import pipeline
 from typing import List, Dict
 import matplotlib.pyplot as plt
 from py2neo import Graph, Node, Relationship, NodeMatcher
+import PyPDF2
+import pickle
 from dotenv import load_dotenv
 load_dotenv()
 import os
+from semantic_chunking import SemanticChunking
+
+def extract_text_from_pdf(pdf_path):
+    # Open the PDF file in binary mode
+    with open(pdf_path, "rb") as file:
+        # Create a PDF reader object
+        pdf_reader = PyPDF2.PdfReader(file)
+        
+        # Initialize an empty string to store the extracted text
+        full_text = ""
+        
+        # Iterate through each page and extract text
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            full_text += page.extract_text()
+        
+    return full_text
+
+def save_list_to_file(list_data, filename="data.pkl"):
+    with open(filename, "wb") as file:
+        pickle.dump(list_data, file)
+
+# Load list from file
+def load_list_from_file(filename="data.pkl"):
+    with open(filename, "rb") as file:
+        return pickle.load(file)
 
 class RebelKGExtractor:
     def __init__(self, model_name: str = "Babelscape/mrebel-large"):
@@ -15,7 +43,7 @@ class RebelKGExtractor:
         Initialize REBEL model for relation extraction
         """
         self.device = torch.device('cuda' if not torch.cuda.is_available() else 'cpu')
-        self.triplet_extractor = pipeline('translation_xx_to_yy', model=model_name, tokenizer=model_name, device=self.device,max_length=1024)
+        self.triplet_extractor = pipeline('translation_xx_to_yy', model=model_name, tokenizer=model_name, device=self.device,max_length=2048)
     
         
     def extract_triplets(self,text):
@@ -231,47 +259,55 @@ def main():
     )
     
     # Example text for extraction
-    text = """
-    Tom Hanks starred in Forrest Gump, delivering an iconic performance that earned him an Academy Award for Best Actor. The movie was masterfully directed by Robert Zemeckis, who brought the heartwarming story to life. The film follows the extraordinary life journey of Forrest Gump, a slow-witted but kind-hearted man from Alabama.
+    # text = """
+    # Tom Hanks starred in Forrest Gump, delivering an iconic performance that earned him an Academy Award for Best Actor. The movie was masterfully directed by Robert Zemeckis, who brought the heartwarming story to life. The film follows the extraordinary life journey of Forrest Gump, a slow-witted but kind-hearted man from Alabama.
 
-    Tom Hanks also appeared in Cast Away, which was also directed by Robert Zemeckis. In Cast Away, Hanks portrayed Chuck Noland, a FedEx executive who survives a plane crash and becomes stranded on an uninhabited island for four years. This challenging role showcased Hanks' incredible range as an actor.
+    # Tom Hanks also appeared in Cast Away, which was also directed by Robert Zemeckis. In Cast Away, Hanks portrayed Chuck Noland, a FedEx executive who survives a plane crash and becomes stranded on an uninhabited island for four years. This challenging role showcased Hanks' incredible range as an actor.
 
-    Forrest Gump was released in 1994 and won several Academy Awards, including Best Picture, Best Director, and Best Adapted Screenplay. The film's groundbreaking visual effects seamlessly integrated Forrest into historical footage with figures like John F. Kennedy and John Lennon. The movie's soundtrack became a cultural phenomenon, featuring classic songs from multiple decades.
+    # Forrest Gump was released in 1994 and won several Academy Awards, including Best Picture, Best Director, and Best Adapted Screenplay. The film's groundbreaking visual effects seamlessly integrated Forrest into historical footage with figures like John F. Kennedy and John Lennon. The movie's soundtrack became a cultural phenomenon, featuring classic songs from multiple decades.
 
-    The film's success extended beyond awards, as it became a box office sensation, grossing over $678 million worldwide. Robin Wright played Jenny Curran, Forrest's childhood friend and love interest, while Gary Sinise portrayed Lieutenant Dan Taylor, Forrest's platoon leader in Vietnam who later becomes his business partner in the shrimping industry.
+    # The film's success extended beyond awards, as it became a box office sensation, grossing over $678 million worldwide. Robin Wright played Jenny Curran, Forrest's childhood friend and love interest, while Gary Sinise portrayed Lieutenant Dan Taylor, Forrest's platoon leader in Vietnam who later becomes his business partner in the shrimping industry.
 
-    The movie's memorable quotes, such as "Life is like a box of chocolates" and "Run, Forrest, run!" became deeply embedded in popular culture. The story spans several decades of American history, touching on pivotal moments like the Vietnam War, the Watergate scandal, and the emergence of Apple Computer.
+    # The movie's memorable quotes, such as "Life is like a box of chocolates" and "Run, Forrest, run!" became deeply embedded in popular culture. The story spans several decades of American history, touching on pivotal moments like the Vietnam War, the Watergate scandal, and the emergence of Apple Computer.
 
-    Sally Field played Mrs. Gump, Forrest's devoted mother who goes to great lengths to ensure her son receives a proper education. The film also features Michael Conner Humphreys as young Forrest, whose real-life accent inspired Tom Hanks' portrayal of the adult character.
+    # Sally Field played Mrs. Gump, Forrest's devoted mother who goes to great lengths to ensure her son receives a proper education. The film also features Michael Conner Humphreys as young Forrest, whose real-life accent inspired Tom Hanks' portrayal of the adult character.
 
-    The screenplay was adapted by Eric Roth from the 1986 novel of the same name by Winston Groom. The film's production took place primarily in South Carolina, Georgia, and North Carolina, with the famous running scenes filmed across multiple locations in America. The iconic bench scenes were filmed in Chippewa Square in Savannah, Georgia.
+    # The screenplay was adapted by Eric Roth from the 1986 novel of the same name by Winston Groom. The film's production took place primarily in South Carolina, Georgia, and North Carolina, with the famous running scenes filmed across multiple locations in America. The iconic bench scenes were filmed in Chippewa Square in Savannah, Georgia.
 
-    Alan Silvestri composed the film's emotional musical score, which perfectly complemented the story's touching moments. The movie's success influenced popular culture and spawned a restaurant chain, Bubba Gump Shrimp Company, named after the film's fictional shrimping business.
-    """
-    
-    # Extract and add to both graphs
-    triplets = kg.extract_and_add_from_text(text)
-    print("Extracted triplets:", triplets)
+    # Alan Silvestri composed the film's emotional musical score, which perfectly complemented the story's touching moments. The movie's success influenced popular culture and spawned a restaurant chain, Bubba Gump Shrimp Company, named after the film's fictional shrimping business.
+    # """
+    text = extract_text_from_pdf("Helen Keller.pdf")
+    print("PDF Loaded ...")
+    Semantic_chunking = SemanticChunking()
+    docs = Semantic_chunking(text=text)
+    save_list_to_file(docs, "Helen_chunk.pkl")
+    print("Semantic Chunking Done ...")
+    for doc in docs:
+        content = doc.page_content
+        # Extract and add to both graphs
+        _ = kg.extract_and_add_from_text(content)
+    print("KG Created!!")
+    # print("Extracted triplets:", triplets)
     
     # Initialize subgraph retriever
-    retriever = kg.SubgraphRetriever(
-        kg.graph,
-        kg.rebel_extractor
-    )
+    # retriever = kg.SubgraphRetriever(
+    #     kg.graph,
+    #     kg.rebel_extractor
+    # )
     
-    # Example question
-    question = "When forrest gump released?"
+    # # Example question
+    # question = "When forrest gump released?"
     
-    # Get answer
-    try:
-        question_entities = retriever.extract_question_entities(question)
-        print(f"Found entities: {question_entities}")
-        answer = retriever.answer_question(question=question)
-        print(answer)
-        nx.write_graphml(kg.graph, 'graph.gpickle')
-        kg.visualize_graph()
-    except Exception as e:
-        print(f"Error: {e}")
+    # # Get answer
+    # try:
+    #     question_entities = retriever.extract_question_entities(question)
+    #     print(f"Found entities: {question_entities}")
+    #     answer = retriever.answer_question(question=question)
+    #     print(answer)
+    #     nx.write_graphml(kg.graph, 'graph.gpickle')
+    #     kg.visualize_graph()
+    # except Exception as e:
+    #     print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
