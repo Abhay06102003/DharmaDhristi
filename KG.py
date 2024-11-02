@@ -1,5 +1,6 @@
 import networkx as nx
 import torch
+torch.cuda.empty_cache()
 from transformers import pipeline
 from typing import List, Dict
 import matplotlib.pyplot as plt
@@ -9,38 +10,41 @@ load_dotenv()
 import os
 
 class RebelKGExtractor:
-    def __init__(self, model_name: str = "Babelscape/rebel-large"):
+    def __init__(self, model_name: str = "Babelscape/mrebel-large"):
         """
         Initialize REBEL model for relation extraction
         """
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.triplet_extractor = pipeline('text2text-generation', model=model_name, tokenizer=model_name, device='cuda')    
+        self.device = torch.device('cuda' if not torch.cuda.is_available() else 'cpu')
+        self.triplet_extractor = pipeline('translation_xx_to_yy', model=model_name, tokenizer=model_name, device=self.device,max_length=1024)
+    
         
-    def extract_triplets(self, text):
-        """
-        Extract triplets from text using REBEL
-        """
-        extracted_text = self.triplet_extractor.tokenizer.batch_decode([self.triplet_extractor(text, return_tensors=True, return_text=False)[0]["generated_token_ids"]])
-        text = extracted_text[0]
+    def extract_triplets(self,text):
+        text = self.triplet_extractor.tokenizer.batch_decode([self.triplet_extractor(text, decoder_start_token_id=250058, src_lang="en_XX", tgt_lang="<triplet>", return_tensors=True, return_text=False)[0]["translation_token_ids"]]) # change en_XX for the language of the source.
+        text = text[0]
         triplets = []
-        relation, subject, relation, object_ = '', '', '', ''
+        relation = ''
         text = text.strip()
         current = 'x'
-        for token in text.replace("<s>", "").replace("<pad>", "").replace("</s>", "").split():
-            if token == "<triplet>":
+        subject, relation, object_, object_type, subject_type = '','','','',''
+
+        for token in text.replace("<s>", "").replace("<pad>", "").replace("</s>", "").replace("tp_XX", "").replace("__en__", "").split():
+            if token == "<triplet>" or token == "<relation>":
                 current = 't'
                 if relation != '':
-                    triplets.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
+                    triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
                     relation = ''
                 subject = ''
-            elif token == "<subj>":
-                current = 's'
-                if relation != '':
-                    triplets.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
-                object_ = ''
-            elif token == "<obj>":
-                current = 'o'
-                relation = ''
+            elif token.startswith("<") and token.endswith(">"):
+                if current == 't' or current == 'o':
+                    current = 's'
+                    if relation != '':
+                        triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
+                    object_ = ''
+                    subject_type = token[1:-1]
+                else:
+                    current = 'o'
+                    object_type = token[1:-1]
+                    relation = ''
             else:
                 if current == 't':
                     subject += ' ' + token
@@ -48,8 +52,8 @@ class RebelKGExtractor:
                     object_ += ' ' + token
                 elif current == 'o':
                     relation += ' ' + token
-        if subject != '' and relation != '' and object_ != '':
-            triplets.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
+        if subject != '' and relation != '' and object_ != '' and object_type != '' and subject_type != '':
+            triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
         return triplets
 
 class SimplifiedKnowledgeGraph:
@@ -228,9 +232,21 @@ def main():
     
     # Example text for extraction
     text = """
-    Tom Hanks starred in Forrest Gump. The movie was directed by Robert Zemeckis.
-    Tom Hanks also appeared in Cast Away, which was also directed by Robert Zemeckis.
-    Forrest Gump was released in 1994 and won several Academy Awards.
+    Tom Hanks starred in Forrest Gump, delivering an iconic performance that earned him an Academy Award for Best Actor. The movie was masterfully directed by Robert Zemeckis, who brought the heartwarming story to life. The film follows the extraordinary life journey of Forrest Gump, a slow-witted but kind-hearted man from Alabama.
+
+    Tom Hanks also appeared in Cast Away, which was also directed by Robert Zemeckis. In Cast Away, Hanks portrayed Chuck Noland, a FedEx executive who survives a plane crash and becomes stranded on an uninhabited island for four years. This challenging role showcased Hanks' incredible range as an actor.
+
+    Forrest Gump was released in 1994 and won several Academy Awards, including Best Picture, Best Director, and Best Adapted Screenplay. The film's groundbreaking visual effects seamlessly integrated Forrest into historical footage with figures like John F. Kennedy and John Lennon. The movie's soundtrack became a cultural phenomenon, featuring classic songs from multiple decades.
+
+    The film's success extended beyond awards, as it became a box office sensation, grossing over $678 million worldwide. Robin Wright played Jenny Curran, Forrest's childhood friend and love interest, while Gary Sinise portrayed Lieutenant Dan Taylor, Forrest's platoon leader in Vietnam who later becomes his business partner in the shrimping industry.
+
+    The movie's memorable quotes, such as "Life is like a box of chocolates" and "Run, Forrest, run!" became deeply embedded in popular culture. The story spans several decades of American history, touching on pivotal moments like the Vietnam War, the Watergate scandal, and the emergence of Apple Computer.
+
+    Sally Field played Mrs. Gump, Forrest's devoted mother who goes to great lengths to ensure her son receives a proper education. The film also features Michael Conner Humphreys as young Forrest, whose real-life accent inspired Tom Hanks' portrayal of the adult character.
+
+    The screenplay was adapted by Eric Roth from the 1986 novel of the same name by Winston Groom. The film's production took place primarily in South Carolina, Georgia, and North Carolina, with the famous running scenes filmed across multiple locations in America. The iconic bench scenes were filmed in Chippewa Square in Savannah, Georgia.
+
+    Alan Silvestri composed the film's emotional musical score, which perfectly complemented the story's touching moments. The movie's success influenced popular culture and spawned a restaurant chain, Bubba Gump Shrimp Company, named after the film's fictional shrimping business.
     """
     
     # Extract and add to both graphs
@@ -244,14 +260,15 @@ def main():
     )
     
     # Example question
-    question = "Who is Director of Forrest Gump?"
+    question = "When forrest gump released?"
     
     # Get answer
     try:
         question_entities = retriever.extract_question_entities(question)
         print(f"Found entities: {question_entities}")
-        answer = retriever.answer_question(question)
-        print(f"Answer: {answer}")
+        answer = retriever.answer_question(question=question)
+        print(answer)
+        nx.write_graphml(kg.graph, 'graph.gpickle')
         kg.visualize_graph()
     except Exception as e:
         print(f"Error: {e}")

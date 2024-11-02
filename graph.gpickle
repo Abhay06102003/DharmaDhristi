@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="d0" for="edge" attr.name="relation" attr.type="string" />
+  <graph edgedefault="directed">
+    <node id="tom_hanks" />
+    <node id="forrest_gump" />
+    <node id="academy_award_for_best_actor" />
+    <node id="robert_zemeckis" />
+    <node id="cast_away" />
+    <node id="1994" />
+    <node id="best_picture" />
+    <node id="best_director" />
+    <node id="best_adapted_screenplay" />
+    <node id="novel_of_the_same_name" />
+    <node id="winston_groom" />
+    <node id="chippewa_square" />
+    <node id="savannah,_georgia" />
+    <edge source="tom_hanks" target="forrest_gump" id="0">
+      <data key="d0">notable_work</data>
+    </edge>
+    <edge source="tom_hanks" target="academy_award_for_best_actor" id="0">
+      <data key="d0">award_received</data>
+    </edge>
+    <edge source="tom_hanks" target="cast_away" id="0">
+      <data key="d0">notable_work</data>
+    </edge>
+    <edge source="forrest_gump" target="tom_hanks" id="0">
+      <data key="d0">cast_member</data>
+    </edge>
+    <edge source="forrest_gump" target="academy_award_for_best_actor" id="0">
+      <data key="d0">award_received</data>
+    </edge>
+    <edge source="forrest_gump" target="robert_zemeckis" id="0">
+      <data key="d0">director</data>
+    </edge>
+    <edge source="forrest_gump" target="1994" id="0">
+      <data key="d0">publication_date</data>
+    </edge>
+    <edge source="forrest_gump" target="best_picture" id="0">
+      <data key="d0">award_received</data>
+    </edge>
+    <edge source="forrest_gump" target="best_director" id="0">
+      <data key="d0">award_received</data>
+    </edge>
+    <edge source="forrest_gump" target="best_adapted_screenplay" id="0">
+      <data key="d0">award_received</data>
+    </edge>
+    <edge source="forrest_gump" target="novel_of_the_same_name" id="0">
+      <data key="d0">based_on</data>
+    </edge>
+    <edge source="forrest_gump" target="winston_groom" id="0">
+      <data key="d0">after_a_work_by</data>
+    </edge>
+    <edge source="cast_away" target="tom_hanks" id="0">
+      <data key="d0">cast_member</data>
+    </edge>
+    <edge source="novel_of_the_same_name" target="winston_groom" id="0">
+      <data key="d0">author</data>
+    </edge>
+    <edge source="chippewa_square" target="savannah,_georgia" id="0">
+      <data key="d0">located_in_the_administrative_territorial_entity</data>
+    </edge>
+  </graph>
+</graphml>
