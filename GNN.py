@@ -1,17 +1,21 @@
 import torch
 torch.cuda.empty_cache()
 from torch_geometric.data import Data
-from transformers import AutoTokenizer, AutoModel,AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModel,AutoModelForCausalLM,AutoModelForSeq2SeqLM,T5ForConditionalGeneration,T5Tokenizer
 import torch.nn.functional as F
 import networkx as nx
 from typing import List, Dict, Tuple, Set
 import json
+from transformers import pipeline as line
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from gnn_train import GNNModel,WebQSPDataset
 from KG import SimplifiedKnowledgeGraph
+from dotenv import load_dotenv
+load_dotenv()
+import os
 
 def visualize_graph(graph):
     # Set the figure size
@@ -30,8 +34,8 @@ class GNNRagRetriever:
                  model_path: str,
                  graph_path: str,
                  sentence_encoder_name: str = "sentence-transformers/all-mpnet-base-v2",
-                 answer_threshold: float = 0.1,
-                 max_paths: int = 5):
+                 answer_threshold: float = 0.15,
+                 max_paths: int = 15):
         """
         Initialize retriever with pre-trained GNN model
         """
@@ -58,7 +62,7 @@ class GNNRagRetriever:
         
         # Load knowledge graph
         self.graph = nx.read_graphml(graph_path)
-        visualize_graph(self.graph)
+        # visualize_graph(self.graph)
         # Initialize sentence encoder
         self.tokenizer = AutoTokenizer.from_pretrained(sentence_encoder_name)
         self.sentence_encoder = AutoModel.from_pretrained(sentence_encoder_name)
@@ -245,16 +249,28 @@ class QAPipeline:
     def __init__(self,
                  gnn_model_path: str,
                  graph_path: str,
-                 llm_name: str = "Qwen/Qwen1.5-0.5B"):
+                 llm_name: str = "google/flan-t5-large"):
         """Initialize QA pipeline"""
         self.retriever = GNNRagRetriever(gnn_model_path, graph_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(llm_name, trust_remote_code=True)
-        self.llm = AutoModelForCausalLM.from_pretrained(llm_name, trust_remote_code=True)
+        self.llm = T5ForConditionalGeneration.from_pretrained("kiri-ai/t5-base-qa-summary-emotion")
+        self.tokenizer = T5Tokenizer.from_pretrained("kiri-ai/t5-base-qa-summary-emotion")
+        # self.llm =  line("text-generation", model="meta-llama/Llama-3.2-1B",device='cuda',max_new_tokens = 512)     
         
         # Move model to CPU if no GPU available
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.llm = self.llm.to(self.device)
-        self.llm.eval()
+        # self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # self.llm = self.llm.to(self.device)
+        # self.tokenizer = self.tokenizer.to(self.device)
+        # self.llm.eval()
+    
+    def get_answer(self,question, context):
+        input_text = []
+        input_text.append(f"q: {question}")
+        input_text.append(f"c: {context}")
+        input_text = " ".join(input_text)
+        features = self.tokenizer([input_text], return_tensors='pt')
+        tokens = self.llm.generate(input_ids=features['input_ids'], 
+                attention_mask=features['attention_mask'], max_length=512)
+        return self.tokenizer.decode(tokens[0], skip_special_tokens=True)
         
     def answer_question(self, 
                        question: str,
@@ -266,34 +282,34 @@ class QAPipeline:
         verbalized_paths = self.retriever._verbalize_paths(paths)
         
         # Format prompt
-        prompt = f"""Using the following reasoning paths from a knowledge graph, answer the question.
-Only use information from the provided paths. If you cannot find a definitive answer, say so.
+#         prompt = f"""Using the following reasoning paths from a knowledge graph, answer the question.
+# Only use information from the provided paths. If you cannot find a definitive answer, say so.
 
-Reasoning Paths:
-{verbalized_paths}
+# Reasoning Paths:
+# {verbalized_paths}
 
-Question: {question}
+# Question: {question}
 
-Answer:"""
+# Answer:"""
         
         # Generate answer
-        with torch.no_grad():
-            inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        # with torch.no_grad():
+        #     inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+        #     inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            outputs = self.llm.generate(
-                **inputs,
-                max_length=200,
-                num_beams=3,
-                temperature=0.7,
-                top_p=0.9,
-                do_sample=True,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id
-            )
-            answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            answer = answer.replace(prompt, "").strip()
-        
+        #     outputs = self.llm.generate(
+        #         **inputs,
+        #         max_length=200,
+        #         num_beams=3,
+        #         temperature=0.7,
+        #         top_p=0.9,
+        #         do_sample=True,
+        #         pad_token_id=self.tokenizer.pad_token_id,
+        #         eos_token_id=self.tokenizer.eos_token_id
+        #     )
+        #     answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        #     answer = answer.replace(prompt, "").strip()
+        answer = self.get_answer(question, verbalized_paths)
         return {
             "question": question,
             "reasoning_paths": verbalized_paths,
@@ -314,8 +330,14 @@ if __name__ == "__main__":
         gnn_model_path="model_checkpoints/best_model.pt",
         graph_path="graph.gpickle"
     )
-    question = "When did Forrest gump released?"
-    question_entities = ["forrest_gump"]  # From your entity linking system
+    question = "Which fever helen keller have?"
+    question_entities = ["helen_keller"]  # From your entity linking system
     
     result = pipeline.answer_question(question, question_entities)
-    print(json.dumps(result, indent=2))
+    print("-"*150)
+    print(len(result['answer_candidates']))
+    print("-"*150)
+    print(result['llm_answer'])
+    print("-"*150)
+    print(result['reasoning_paths'])
+    print("-"*150)

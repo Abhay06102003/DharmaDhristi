@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from py2neo import Graph, Node, Relationship, NodeMatcher
 import PyPDF2
 import pickle
+from tqdm import tqdm
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -28,61 +29,161 @@ def extract_text_from_pdf(pdf_path):
         
     return full_text
 
-def save_list_to_file(list_data, filename="data.pkl"):
+def save_list_to_file(list_data, filename):
     with open(filename, "wb") as file:
         pickle.dump(list_data, file)
 
 # Load list from file
-def load_list_from_file(filename="data.pkl"):
+def load_list_from_file(filename):
     with open(filename, "rb") as file:
         return pickle.load(file)
 
 class RebelKGExtractor:
-    def __init__(self, model_name: str = "Babelscape/mrebel-large"):
+    def __init__(self, model_name: str = "Babelscape/mrebel-large", max_length: int = 1024):
         """
         Initialize REBEL model for relation extraction
+        Args:
+            model_name: The name of the REBEL model to use
+            max_length: Maximum sequence length for processing
         """
-        self.device = torch.device('cuda' if not torch.cuda.is_available() else 'cpu')
-        self.triplet_extractor = pipeline('translation_xx_to_yy', model=model_name, tokenizer=model_name, device=self.device,max_length=2048)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.max_length = max_length
+        self.triplet_extractor = pipeline(
+            'translation_xx_to_yy',
+            model=model_name,
+            tokenizer=model_name,
+            device=self.device,
+            max_length=self.max_length
+        )
     
+    def _split_text(self, text: str, max_chars: int = 450) -> List[str]:
+        """
+        Split text into smaller chunks based on sentence boundaries
+        Args:
+            text: Input text to split
+            max_chars: Maximum characters per chunk
+        Returns:
+            List of text chunks
+        """
+        # Split text into sentences (basic implementation)
+        sentences = [s.strip() for s in text.replace('\n', ' ').split('.') if s.strip()]
         
-    def extract_triplets(self,text):
-        text = self.triplet_extractor.tokenizer.batch_decode([self.triplet_extractor(text, decoder_start_token_id=250058, src_lang="en_XX", tgt_lang="<triplet>", return_tensors=True, return_text=False)[0]["translation_token_ids"]]) # change en_XX for the language of the source.
-        text = text[0]
-        triplets = []
-        relation = ''
-        text = text.strip()
-        current = 'x'
-        subject, relation, object_, object_type, subject_type = '','','','',''
-
-        for token in text.replace("<s>", "").replace("<pad>", "").replace("</s>", "").replace("tp_XX", "").replace("__en__", "").split():
-            if token == "<triplet>" or token == "<relation>":
-                current = 't'
-                if relation != '':
-                    triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
-                    relation = ''
-                subject = ''
-            elif token.startswith("<") and token.endswith(">"):
-                if current == 't' or current == 'o':
-                    current = 's'
-                    if relation != '':
-                        triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
-                    object_ = ''
-                    subject_type = token[1:-1]
-                else:
-                    current = 'o'
-                    object_type = token[1:-1]
-                    relation = ''
+        chunks = []
+        current_chunk = []
+        current_length = 0
+        
+        for sentence in sentences:
+            sentence = sentence.strip() + '.'
+            sentence_length = len(sentence)
+            
+            if current_length + sentence_length > max_chars and current_chunk:
+                # Join the current chunk and add to chunks list
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_length = sentence_length
             else:
-                if current == 't':
-                    subject += ' ' + token
-                elif current == 's':
-                    object_ += ' ' + token
-                elif current == 'o':
-                    relation += ' ' + token
-        if subject != '' and relation != '' and object_ != '' and object_type != '' and subject_type != '':
-            triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
-        return triplets
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        # Add the last chunk if it exists
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        return chunks
+        
+    def extract_triplets(self, text: str) -> List[Dict]:
+        """
+        Extract triplets from text, handling long sequences by splitting into chunks
+        Args:
+            text: Input text to extract triplets from
+        Returns:
+            List of triplets extracted from the text
+        """
+        # Split text into smaller chunks
+        if len(text) > self.max_length:
+            text_chunks = self._split_text(text)
+        else:
+            text_chunks = [text]
+        text_chunks = self._split_text(text)
+        all_triplets = []
+        
+        # Process each chunk
+        for chunk in text_chunks:
+            try:
+                # Extract triplets from the current chunk
+                chunk_result = self.triplet_extractor.tokenizer.batch_decode([
+                    self.triplet_extractor(
+                        chunk,
+                        decoder_start_token_id=250058,
+                        src_lang="en_XX",
+                        tgt_lang="<triplet>",
+                        return_tensors=True,
+                        return_text=False,
+                        max_length=self.max_length
+                    )[0]["translation_token_ids"]
+                ])
+                
+                text = chunk_result[0]
+                triplets = []
+                relation = ''
+                text = text.strip()
+                current = 'x'
+                subject, relation, object_, object_type, subject_type = '','','','',''
+
+                for token in text.replace("<s>", "").replace("<pad>", "").replace("</s>", "").replace("tp_XX", "").replace("__en__", "").split():
+                    if token == "<triplet>" or token == "<relation>":
+                        current = 't'
+                        if relation != '':
+                            triplets.append({
+                                'head': subject.strip(),
+                                'head_type': subject_type,
+                                'type': relation.strip(),
+                                'tail': object_.strip(),
+                                'tail_type': object_type
+                            })
+                            relation = ''
+                        subject = ''
+                    elif token.startswith("<") and token.endswith(">"):
+                        if current == 't' or current == 'o':
+                            current = 's'
+                            if relation != '':
+                                triplets.append({
+                                    'head': subject.strip(),
+                                    'head_type': subject_type,
+                                    'type': relation.strip(),
+                                    'tail': object_.strip(),
+                                    'tail_type': object_type
+                                })
+                            object_ = ''
+                            subject_type = token[1:-1]
+                        else:
+                            current = 'o'
+                            object_type = token[1:-1]
+                            relation = ''
+                    else:
+                        if current == 't':
+                            subject += ' ' + token
+                        elif current == 's':
+                            object_ += ' ' + token
+                        elif current == 'o':
+                            relation += ' ' + token
+                
+                if subject != '' and relation != '' and object_ != '' and object_type != '' and subject_type != '':
+                    triplets.append({
+                        'head': subject.strip(),
+                        'head_type': subject_type,
+                        'type': relation.strip(),
+                        'tail': object_.strip(),
+                        'tail_type': object_type
+                    })
+                
+                all_triplets.extend(triplets)
+                
+            except Exception as e:
+                print(f"Error processing chunk: {str(e)}")
+                continue
+        
+        return all_triplets
 
 class SimplifiedKnowledgeGraph:
     def __init__(self, neo4j_uri, neo4j_user, neo4j_password):
@@ -118,7 +219,7 @@ class SimplifiedKnowledgeGraph:
         self.neo4j_graph.merge(tail_node, "Entity", "name")
         
         # Create relationship
-        rel = Relationship(head_node, relation, tail_node,)
+        rel = Relationship(head_node, relation, tail_node)
         self.neo4j_graph.merge(rel)
         
     def extract_and_add_from_text(self, text: str) -> List[Dict]:
@@ -276,16 +377,24 @@ def main():
 
     # Alan Silvestri composed the film's emotional musical score, which perfectly complemented the story's touching moments. The movie's success influenced popular culture and spawned a restaurant chain, Bubba Gump Shrimp Company, named after the film's fictional shrimping business.
     # """
-    text = extract_text_from_pdf("Helen Keller.pdf")
-    print("PDF Loaded ...")
-    Semantic_chunking = SemanticChunking()
-    docs = Semantic_chunking(text=text)
-    save_list_to_file(docs, "Helen_chunk.pkl")
-    print("Semantic Chunking Done ...")
-    for doc in docs:
+    if os.path.exists("Helen_chunk.pkl"):
+        print("Loading pre-chunked data from Helen_chunk.pkl ...")
+        docs = load_list_from_file("Helen_chunk.pkl")
+    else:
+        text = extract_text_from_pdf("Helen Keller.pdf")
+        print("PDF Loaded ...")
+        Semantic_chunking = SemanticChunking()
+        docs = Semantic_chunking(text=text)
+        save_list_to_file(docs, "Helen_chunk.pkl")
+        print("Semantic Chunking Done ...")
+
+    # Process documents with a progress bar
+    for doc in tqdm(docs, desc="Processing Docs"):
         content = doc.page_content
         # Extract and add to both graphs
         _ = kg.extract_and_add_from_text(content)
+
+    nx.write_graphml(kg.graph, 'graph.gpickle')
     print("KG Created!!")
     # print("Extracted triplets:", triplets)
     
@@ -304,7 +413,6 @@ def main():
     #     print(f"Found entities: {question_entities}")
     #     answer = retriever.answer_question(question=question)
     #     print(answer)
-    #     nx.write_graphml(kg.graph, 'graph.gpickle')
     #     kg.visualize_graph()
     # except Exception as e:
     #     print(f"Error: {e}")

@@ -10,7 +10,7 @@ class SemanticChunking:
         Initialize BERT model for semantic chunking
         """
         self.embed_model = FastEmbedEmbeddings(model_name="BAAI/bge-base-en-v1.5")
-        self.semantic_chunker = SemanticChunker(self.embed_model,breakpoint_threshold_type = 'percentile',min_chunk_size=512)
+        self.semantic_chunker = SemanticChunker(self.embed_model,breakpoint_threshold_type = 'percentile',min_chunk_size=512,)
     
     def __call__(self,text):
         """
